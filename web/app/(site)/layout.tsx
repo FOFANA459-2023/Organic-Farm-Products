@@ -2,6 +2,9 @@ import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
 import { getSettings } from "@/lib/api";
 
+// Every page reads live catalogue/settings from the API, so never try to prerender at build time.
+export const dynamic = "force-dynamic";
+
 export default async function SiteLayout({ children }: { children: React.ReactNode }) {
   const settings = await getSettings();
   return (

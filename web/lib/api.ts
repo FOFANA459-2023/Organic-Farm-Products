@@ -1,4 +1,5 @@
 import type { ApiError, Category, Post, Product, Settings } from "@ofp/shared";
+import { unstable_rethrow } from "next/navigation";
 
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8787";
 
@@ -88,6 +89,7 @@ export async function getSettings(): Promise<Settings> {
   try {
     return await apiFetch<Settings>("/settings");
   } catch (e) {
+    unstable_rethrow(e); // let Next.js internal signals through
     console.error("Settings fetch failed, using fallback", e);
     return FALLBACK_SETTINGS;
   }
