@@ -1,0 +1,107 @@
+@import "tailwindcss";
+
+/* Brand tokens — derived from the logo (fresh light green + near-black wordmark)
+   and the farm/food theme (grain accent). */
+@theme {
+  --color-sprout: #cdf0b0; /* logo background */
+  --color-sprout-light: #e5f6d6;
+  --color-mist: #f5faf0; /* page background */
+  --color-cream: #fdfcf8; /* cards */
+  --color-line: #d9e6cc;
+
+  --color-leaf: #3a7425; /* primary actions — AA on white and on mist */
+  --color-leaf-dark: #2a5719;
+  --color-leaf-soft: #6f9f58;
+
+  --color-ink: #141414; /* wordmark black */
+  --color-ink-soft: #46523f;
+  --color-muted: #66705f;
+
+  --color-grain: #c9a15a; /* sorghum / maize accent */
+  --color-grain-light: #f3e7cc;
+  --color-grain-dark: #7d5d22;
+
+  --color-danger: #b42318;
+
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-signika), var(--font-inter), ui-sans-serif, sans-serif;
+
+  --radius-card: 1.25rem;
+}
+
+:root {
+  color-scheme: light;
+}
+
+body {
+  background: var(--color-mist);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  font-family: var(--font-display);
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+
+p {
+  text-wrap: pretty;
+}
+
+:focus-visible {
+  outline: 3px solid var(--color-leaf);
+  outline-offset: 2px;
+}
+
+@utility container-page {
+  @apply mx-auto w-full max-w-6xl px-4 sm:px-6;
+}
+
+/* Wide letter-spaced caps, echoing the logo tagline */
+@utility eyebrow {
+  @apply text-xs font-medium uppercase tracking-[0.3em] text-leaf;
+}
+
+@utility btn {
+  @apply inline-flex items-center justify-center gap-2 rounded-full px-5 py-3 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60;
+}
+@utility btn-primary {
+  @apply btn bg-leaf text-white hover:bg-leaf-dark;
+}
+@utility btn-secondary {
+  @apply btn border border-ink/15 bg-white text-ink hover:border-leaf hover:text-leaf;
+}
+@utility btn-whatsapp {
+  @apply btn bg-[#1f8a4c] text-white hover:bg-[#176b3b];
+}
+
+@utility card {
+  @apply rounded-[var(--radius-card)] border border-line bg-cream;
+}
+
+@utility field-label {
+  @apply mb-1.5 block text-sm font-medium text-ink;
+}
+@utility field-input {
+  @apply w-full rounded-xl border border-line bg-white px-3.5 py-2.5 text-[15px] text-ink placeholder:text-muted/70 focus:border-leaf focus:outline-none focus:ring-2 focus:ring-leaf/25;
+}
+@utility field-error {
+  @apply mt-1 text-sm text-danger;
+}
+
+@utility prose-farm {
+  & p {
+    @apply mb-4 leading-relaxed text-ink-soft;
+  }
+}
+
+/* Thin leaf/seed line texture used behind some sections */
+@utility bg-seeds {
+  background-image: radial-gradient(circle at 1px 1px, rgb(58 116 37 / 0.12) 1px, transparent 0);
+  background-size: 22px 22px;
+}

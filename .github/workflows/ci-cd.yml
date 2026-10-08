@@ -1,0 +1,165 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-cd-${{ github.ref }}
+  # Never cancel a production deploy halfway; superseded PR runs can be cancelled.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------- CI
+  check:
+    name: Typecheck, lint, test, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm --filter web lint
+      - run: pnpm --filter api test
+      - name: Build website for Cloudflare (OpenNext)
+        working-directory: web
+        run: pnpm exec opennextjs-cloudflare build
+        env:
+          # Placeholders: pages render on request, so the build never calls these.
+          NEXT_PUBLIC_API_URL: https://api.example.invalid
+          NEXT_PUBLIC_SITE_URL: https://example.invalid
+          NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder
+          NEXT_PUBLIC_TURNSTILE_SITE_KEY: 1x00000000000000000000AA
+
+  database:
+    name: Migrations apply cleanly
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - name: Start Postgres with all migrations + seed
+        run: supabase db start
+      - name: Sanity check
+        run: |
+          psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -c "
+            do \$\$ begin
+              if (select count(*) from public.products) < 1 then raise exception 'seed missing'; end if;
+              if exists (select 1 from pg_tables where schemaname = 'public' and not rowsecurity)
+                then raise exception 'a public table has RLS disabled'; end if;
+            end \$\$;"
+
+  # ---------------------------------------------------------------- CD
+  deploy-gate:
+    name: Deployment configured?
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      ready: ${{ steps.check.outputs.ready }}
+    steps:
+      - id: check
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          TURNSTILE_SECRET_KEY: ${{ secrets.TURNSTILE_SECRET_KEY }}
+          NEXT_PUBLIC_API_URL: ${{ vars.NEXT_PUBLIC_API_URL }}
+          NEXT_PUBLIC_SITE_URL: ${{ vars.NEXT_PUBLIC_SITE_URL }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ vars.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          NEXT_PUBLIC_TURNSTILE_SITE_KEY: ${{ vars.NEXT_PUBLIC_TURNSTILE_SITE_KEY }}
+          WEB_ORIGIN: ${{ vars.WEB_ORIGIN }}
+        run: |
+          missing=""
+          for name in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID SUPABASE_ACCESS_TOKEN SUPABASE_DB_PASSWORD \
+                      SUPABASE_PROJECT_ID SUPABASE_URL SUPABASE_SERVICE_ROLE_KEY TURNSTILE_SECRET_KEY \
+                      NEXT_PUBLIC_API_URL NEXT_PUBLIC_SITE_URL NEXT_PUBLIC_SUPABASE_URL \
+                      NEXT_PUBLIC_SUPABASE_ANON_KEY NEXT_PUBLIC_TURNSTILE_SITE_KEY WEB_ORIGIN; do
+            [ -z "${!name}" ] && missing="$missing $name"
+          done
+          if [ -n "$missing" ]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Deploy skipped::Not configured yet. Missing:$missing (see README → CI/CD)."
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  deploy:
+    name: Deploy (database → API → website)
+    needs: [check, database, deploy-gate]
+    if: needs.deploy-gate.outputs.ready == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment: production
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Apply database migrations
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: |
+          pnpm exec supabase link --project-ref "${{ secrets.SUPABASE_PROJECT_ID }}"
+          pnpm exec supabase db push
+
+      - name: Deploy API
+        working-directory: api
+        env:
+          WEB_ORIGIN: ${{ vars.WEB_ORIGIN }}
+          EMAIL_FROM: ${{ vars.EMAIL_FROM || 'Organic Farm Products <onboarding@resend.dev>' }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          TURNSTILE_SECRET_KEY: ${{ secrets.TURNSTILE_SECRET_KEY }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+        run: |
+          pnpm exec wrangler deploy --minify --var "WEB_ORIGIN:$WEB_ORIGIN" --var "EMAIL_FROM:$EMAIL_FROM"
+          jq -n \
+            --arg SUPABASE_URL "$SUPABASE_URL" \
+            --arg SUPABASE_SERVICE_ROLE_KEY "$SUPABASE_SERVICE_ROLE_KEY" \
+            --arg TURNSTILE_SECRET_KEY "$TURNSTILE_SECRET_KEY" \
+            --arg RESEND_API_KEY "$RESEND_API_KEY" \
+            '$ARGS.named | with_entries(select(.value != ""))' > secrets.json
+          pnpm exec wrangler secret bulk secrets.json
+          rm secrets.json
+
+      - name: Deploy website
+        working-directory: web
+        env:
+          NEXT_PUBLIC_API_URL: ${{ vars.NEXT_PUBLIC_API_URL }}
+          NEXT_PUBLIC_SITE_URL: ${{ vars.NEXT_PUBLIC_SITE_URL }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ vars.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          NEXT_PUBLIC_TURNSTILE_SITE_KEY: ${{ vars.NEXT_PUBLIC_TURNSTILE_SITE_KEY }}
+          NEXT_PUBLIC_CF_ANALYTICS_TOKEN: ${{ vars.NEXT_PUBLIC_CF_ANALYTICS_TOKEN }}
+        run: pnpm exec opennextjs-cloudflare build && pnpm exec opennextjs-cloudflare deploy
+
+      - name: Smoke test
+        run: |
+          curl -fsS "${{ vars.NEXT_PUBLIC_API_URL }}/health"
+          curl -fsS -o /dev/null "${{ vars.NEXT_PUBLIC_SITE_URL }}/"

@@ -1,0 +1,26 @@
+{
+  "name": "api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --port 8787",
+    "deploy": "wrangler deploy --minify",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "cf-typegen": "wrangler types --env-interface CloudflareBindings"
+  },
+  "dependencies": {
+    "@ofp/shared": "workspace:*",
+    "@supabase/supabase-js": "^2.58.0",
+    "hono": "^4.9.0",
+    "zod": "^4.1.0"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.9.0",
+    "@cloudflare/workers-types": "^5.20261007.1",
+    "typescript": "^5.9.0",
+    "vitest": "~3.2.0",
+    "wrangler": "^4.40.0"
+  }
+}
